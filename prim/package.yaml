@@ -1,0 +1,43 @@
+name:                casino-prim
+version:             0.0.0
+github:              "input-output-hk/casino"
+license:             BSD3
+author:              "Vincent Hanquez"
+maintainer:          "vincent.hanquez@iohk.io"
+copyright:           "2017-2018 Input Output HK"
+
+# Metadata used when publishing your package
+# synopsis:            Short description of your package
+# category:            Web
+
+# To avoid duplicated efforts in documentation and dealing with the
+# complications of embedding Haddock markup inside cabal files, it is
+# common to point users to the README.md file.
+description:         Please see the README on GitHub at <https://github.com/input-output-hk/hs-casino#readme>
+
+dependencies:
+- base >= 0 && < 10
+- memory
+- deepseq
+- binary
+- bytestring
+- cryptonite
+- cryptonite-openssl >= 0.3
+- integer-gmp
+- ghc-prim
+- foundation >= 0.0.20
+- basement >= 0.0.7
+
+library:
+  source-dirs: src
+
+#tests:
+#  prim-test:
+#    main:                Spec.hs
+#    source-dirs:         test
+#    ghc-options:
+#    - -threaded
+#    - -rtsopts
+#    - -with-rtsopts=-N
+#    dependencies:
+#    - casino-prim
