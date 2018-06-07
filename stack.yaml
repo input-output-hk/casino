@@ -1,4 +1,7 @@
 resolver: lts-11.10
 packages:
-- prim/
-- shuffle-proof/
+- location: prim/
+  extra-dep: true
+- location: shuffle-proof/
+  extra-dep: true
+- location: poker/
