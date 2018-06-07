@@ -71,3 +71,6 @@ mergeIntersperse (ListN.unListN -> l1) (ListN.unListN -> l2) =
 
 rewriteListN_M1P1 :: 1 <= x => ListN ((x-1)+1) a -> ListN x a
 rewriteListN_M1P1 = coerce
+
+rewriteListN_P1M1 :: ListN ((x+1)-1) a -> ListN x a
+rewriteListN_P1M1 = coerce
