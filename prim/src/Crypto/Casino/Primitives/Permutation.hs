@@ -49,7 +49,7 @@ instance (KnownNat n, NatWithinBound Int n) => Arbitrary (Permutation n) where
 
 -- | The identity permutation which doesn't change anything when applied
 --
--- identity = { 0, 1, .., n }
+-- identity = { 0, 1, .., n-1 }
 identity :: KnownNat n => Permutation n
 identity = Permutation $ ListN.create id
 
