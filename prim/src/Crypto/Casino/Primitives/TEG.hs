@@ -16,6 +16,7 @@ module Crypto.Casino.Primitives.TEG
     , PublicKey
     , PublicBroadcast
     , DecryptBroadcast
+    , DecryptSharePoint
     , Ciphertext
     , JointPublicKey
     , Random
@@ -24,6 +25,7 @@ module Crypto.Casino.Primitives.TEG
     , generation
     , randomNew
     , combine
+    , combineVerify
     , reEncrypter
     , publicBroadcastVerify
     , ciphertextCreate
@@ -39,6 +41,7 @@ module Crypto.Casino.Primitives.TEG
     , encryptionRandom1
     , reRandomize
     , decryptShare
+    , decryptShareNoProof
     , verifiableDecrypt
     , verifiableDecryptOwn
     , integerToMessage
@@ -66,8 +69,13 @@ type PublicKey = Point
 type SecretKey = Scalar
 type Random = Scalar
 
+newtype DecryptSharePoint = DecryptSharePoint Point
+    deriving (Show,Eq,Generic)
+
+instance NFData DecryptSharePoint
+
 type PublicBroadcast = (PublicKey, DLOG.Proof)
-type DecryptBroadcast = (Point, DLEQ.Proof)
+type DecryptBroadcast = (DecryptSharePoint, DLEQ.Proof)
 
 data Ciphertext = Ciphertext Point Point
     deriving (Show,Eq,Generic)
@@ -144,6 +152,11 @@ publicBroadcastVerify (pk, dlog) = DLOG.verify (DLOG.DLOG curveGenerator pk) dlo
 combine :: [PublicBroadcast] -> JointPublicKey
 combine l = JointPublicKey $ foldl' (.+) pointIdentity $ map fst l
 
+combineVerify :: [PublicBroadcast] -> Maybe JointPublicKey
+combineVerify l
+    | and $ fmap publicBroadcastVerify l = Just $ combine l
+    | otherwise                          = Nothing
+
 encryption :: MonadRandom random => JointPublicKey -> Message -> random Ciphertext
 encryption pk msg = encryptionWith pk msg <$> keyGenerate
 
@@ -162,9 +175,6 @@ reEncrypter jpk = encryptionWith jpk pointIdentity
 
 reRandomize :: JointPublicKey -> Random -> Ciphertext -> Ciphertext
 reRandomize jpk r c = reEncrypter jpk r `ciphertextMul` c
-    --Ciphertext (pointFromSecret r .+ c1) ((h .* r) .+ c2)
-
--- ciphertextMul (Ciphertext c1a c1b) (Ciphertext c2a c2b) = Ciphertext (c1a .+ c2a) (c1b .+ c2b)
 
 decryptShare :: MonadRandom random
              => SecretKey
@@ -175,7 +185,12 @@ decryptShare sk (Ciphertext c1 _) = toDecryptBroadcast <$> keyGenerate
     !d = c1 .* sk
     pk = pointFromSecret sk
     toDecryptBroadcast dleqR =
-        (d, DLEQ.generate dleqR sk (DLEQ.DLEQ curveGenerator pk c1 d))
+        (DecryptSharePoint d, DLEQ.generate dleqR sk (DLEQ.DLEQ curveGenerator pk c1 d))
+
+decryptShareNoProof :: SecretKey
+                    -> Ciphertext
+                    -> DecryptSharePoint
+decryptShareNoProof sk (Ciphertext c1 _) = DecryptSharePoint d where !d = c1 .* sk
 
 verifiableDecrypt :: [(PublicKey, DecryptBroadcast)] -- ^ decrypt broadcast associated with their public key
                   -> Ciphertext
@@ -184,14 +199,14 @@ verifiableDecrypt decrypts (Ciphertext c1 c2)
     | allVerify = Just (c2 .- sumds)
     | otherwise = Nothing
   where
-    allVerify = and $ map (\(pk, (di, dleq)) -> DLEQ.verify (DLEQ.DLEQ curveGenerator pk c1 di) dleq) decrypts
+    allVerify = and $ map (\(pk, (DecryptSharePoint di, dleq)) -> DLEQ.verify (DLEQ.DLEQ curveGenerator pk c1 di) dleq) decrypts
     sumds = foldl' (.+) pointIdentity $ map fst decrypts
 
-verifiableDecryptOwn :: Point
+verifiableDecryptOwn :: DecryptSharePoint
                      -> [(PublicKey, DecryptBroadcast)]
                      -> Ciphertext
                      -> Maybe Message
-verifiableDecryptOwn selfP decrypts ct =
+verifiableDecryptOwn (DecryptSharePoint selfP) decrypts ct =
     case verifiableDecrypt decrypts ct of
         Nothing -> Nothing
         Just m  -> Just (m .+ selfP)
