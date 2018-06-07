@@ -18,6 +18,7 @@ module Crypto.Casino.ZKSH
     ( shuffleProve
     , shuffleVerify
     , ProofDimensions
+    , runShuffle
     , ShuffleProof(..)
     , ShuffleStmt(..)
     , Shuffled(..)
@@ -219,8 +220,3 @@ shuffleVerify pk ck proof stmt =
             $ ListN.zipWith (#+) (ListN.create (\i -> y #* keyFromNum (fromIntegral i+1)))
             $ ListN.zipWith (#+) (exponentsOfX x)
             $ ListN.replicate @o negZ
-
-{-
-commitmentsToPoints :: ListN n (Commitment x) -> ListN n Point
-commitmentsToPoints = ListN.map commitmentToPoint
--}
