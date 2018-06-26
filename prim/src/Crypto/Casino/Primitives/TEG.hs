@@ -57,16 +57,20 @@ import           Crypto.Casino.Primitives.SSize
 import           Crypto.Hash (Blake2b, Digest, hash)
 import qualified Crypto.Casino.Primitives.DLOG as DLOG
 import qualified Crypto.Casino.Primitives.DLEQ as DLEQ
-import           Data.List (foldl')
+import           Data.List (foldl', foldl1')
 import           GHC.Generics
 import           Basement.Sized.List (ListN)
 import qualified Basement.Sized.List as ListN
+import           Basement.Bounded
 
 import           Foundation.Check
 import qualified Data.ByteString as B
 
-type PublicKey = Point
-type SecretKey = Scalar
+newtype PublicKey = PublicKey Point
+    deriving (Show,Eq)
+newtype SecretKey = SecretKey Scalar
+    deriving (Show,Eq)
+
 type Random = Scalar
 
 newtype DecryptSharePoint = DecryptSharePoint Point
@@ -77,6 +81,7 @@ instance NFData DecryptSharePoint
 type PublicBroadcast = (PublicKey, DLOG.Proof)
 type DecryptBroadcast = (DecryptSharePoint, DLEQ.Proof)
 
+-- | Ciphertext under a joint key that include the random element and the ciphered value
 data Ciphertext = Ciphertext Point Point
     deriving (Show,Eq,Generic)
 
@@ -137,20 +142,21 @@ randomNew :: MonadRandom random => random Random
 randomNew = keyGenerate
 
 generation :: MonadRandom random => random (PublicBroadcast, SecretKey)
-generation = addPublicBroadcast <$> keyGenerate
+generation = addPublicBroadcast <$> (SecretKey <$> keyGenerate)
                                 <*> keyGenerate
   where
     addPublicBroadcast :: SecretKey -> Random -> (PublicBroadcast, SecretKey)
-    addPublicBroadcast sk dlogR = ((hi, dlog), sk)
+    addPublicBroadcast sk@(SecretKey skVal) dlogR = ((PublicKey hi, dlog), sk)
           where
-            dlog = DLOG.generate dlogR sk (DLOG.DLOG curveGenerator hi)
-            hi = pointFromSecret sk
+            dlog = DLOG.generate dlogR skVal (DLOG.DLOG curveGenerator hi)
+            hi = pointFromSecret skVal
 
 publicBroadcastVerify :: PublicBroadcast -> Bool
-publicBroadcastVerify (pk, dlog) = DLOG.verify (DLOG.DLOG curveGenerator pk) dlog
+publicBroadcastVerify (PublicKey pk, dlog) = DLOG.verify (DLOG.DLOG curveGenerator pk) dlog
 
 combine :: [PublicBroadcast] -> JointPublicKey
-combine l = JointPublicKey $ foldl' (.+) pointIdentity $ map fst l
+combine l = JointPublicKey $ foldl' (.+) pointIdentity $ map (pubKeyToPoint . fst) l
+  where pubKeyToPoint (PublicKey p) = p
 
 combineVerify :: [PublicBroadcast] -> Maybe JointPublicKey
 combineVerify l
@@ -180,7 +186,7 @@ decryptShare :: MonadRandom random
              => SecretKey
              -> Ciphertext
              -> random DecryptBroadcast
-decryptShare sk (Ciphertext c1 _) = toDecryptBroadcast <$> keyGenerate
+decryptShare (SecretKey sk) (Ciphertext c1 _) = toDecryptBroadcast <$> keyGenerate
   where
     !d = c1 .* sk
     pk = pointFromSecret sk
@@ -190,7 +196,7 @@ decryptShare sk (Ciphertext c1 _) = toDecryptBroadcast <$> keyGenerate
 decryptShareNoProof :: SecretKey
                     -> Ciphertext
                     -> DecryptSharePoint
-decryptShareNoProof sk (Ciphertext c1 _) = DecryptSharePoint d where !d = c1 .* sk
+decryptShareNoProof (SecretKey sk) (Ciphertext c1 _) = DecryptSharePoint d where !d = c1 .* sk
 
 verifiableDecrypt :: [(PublicKey, DecryptBroadcast)] -- ^ decrypt broadcast associated with their public key
                   -> Ciphertext
@@ -199,8 +205,11 @@ verifiableDecrypt decrypts (Ciphertext c1 c2)
     | allVerify = Just (c2 .- sumds)
     | otherwise = Nothing
   where
-    allVerify = and $ map (\(pk, (DecryptSharePoint di, dleq)) -> DLEQ.verify (DLEQ.DLEQ curveGenerator pk c1 di) dleq) decrypts
-    sumds = foldl' (.+) pointIdentity $ map fst decrypts
+    allVerify = and $ map (\(PublicKey pk, (DecryptSharePoint di, dleq)) -> DLEQ.verify (DLEQ.DLEQ curveGenerator pk c1 di) dleq) decrypts
+    sumds = sumDecryptSharePoints $ map (fst . snd) decrypts
+
+sumDecryptSharePoints :: [DecryptSharePoint] -> Point
+sumDecryptSharePoints = foldl1' (.+) . map (\(DecryptSharePoint p) -> p)
 
 verifiableDecryptOwn :: DecryptSharePoint
                      -> [(PublicKey, DecryptBroadcast)]
@@ -209,7 +218,7 @@ verifiableDecryptOwn :: DecryptSharePoint
 verifiableDecryptOwn (DecryptSharePoint selfP) decrypts ct =
     case verifiableDecrypt decrypts ct of
         Nothing -> Nothing
-        Just m  -> Just (m .+ selfP)
+        Just m  -> Just (m .- selfP)
 
 ciphertextCreate :: Scalar -> Point -> Ciphertext
 ciphertextCreate a b = Ciphertext (pointFromSecret a) b
@@ -242,6 +251,12 @@ productCiphertextExponentiate =
 bilinearMap :: ListN n Ciphertext -> ListN n Scalar -> Ciphertext
 bilinearMap = productCiphertextExponentiate
 
+newtype KoblitzEncodingInteger = KoblitzEncodingInteger Integer
+    deriving (Show,Eq)
+
+instance Arbitrary KoblitzEncodingInteger where
+    arbitrary = KoblitzEncodingInteger . (+ 1) . toInteger . unZn <$> (arbitrary :: Gen (Zn 10000))
+
 properties :: Test
 properties = Group "TEG"
     [ Group "math"
@@ -254,9 +269,9 @@ properties = Group "TEG"
         , Property "scale-x2" $ \x -> ciphertextScale (keyFromNum 2) x == (x `ciphertextAdd` x)
         , Property "scale-x3" $ \x -> ciphertextScale (keyFromNum 3) x == ((x `ciphertextAdd` x) `ciphertextAdd` x)
         ]
-    , Group "homomorphic" $
+    , Group "homomorphic"
         [ Property "plus" $ \m1 m2 p1 p2 ->
-            Ciphertext (m1 .+ m2) (p1 .+ p2) == ciphertextAdd (Ciphertext m1 p1) (Ciphertext m2 p2)
+            Ciphertext (m1 .+ m2) (p1 .+ p2) == ciphertextMul (Ciphertext m1 p1) (Ciphertext m2 p2)
         , Property "scale" $ \m1 p1 s ->
             Ciphertext (m1 .* s) (p1 .* s) == ciphertextScale s (Ciphertext m1 p1)
         , Property "scale-commutative" $ \m1 p1 s1 s2 ->
@@ -264,5 +279,35 @@ properties = Group "TEG"
              in (ciphertextScale s1 . ciphertextScale s2) ct == (ciphertextScale s2 . ciphertextScale s1) ct
         -- , Property "scale2" $ \m1 p1 s1 ->
         --     Ciphertext (m1 .* (s1 #+ keyFromNum 1)) (p1 .* (s1 #+ keyFromNum 1)) == (ciphertextScale s1 . ciphertextScale (keyFromNum 1)) (Ciphertext m1 p1)
+        ]
+    , Group "koblitz-probabilitistic"
+        [ Property "decode . encode" $ \(KoblitzEncodingInteger i) ->
+            integerFromMessage (integerToMessage i) == i
+        ]
+    , Group "encrypt-decrypt"
+        [ Property "encrypt-1" $ \drg (KoblitzEncodingInteger i) ->
+            fst $ withDRG (drgNewTest drg) $ do
+                let msg = integerToMessage i
+                (pb, sk) <- generation
+                let jpk = maybe (error "cannot verify") id $ combineVerify [pb]
+                c <- encryption jpk msg
+                db <- decryptShare sk c
+                let mmsg = verifiableDecrypt [(fst pb, db)] c
+                pure $ Just msg === mmsg 
+        , Property "encrypt-2" $ \drg (KoblitzEncodingInteger i) ->
+            fst $ withDRG (drgNewTest drg) $ do
+                let msg = integerToMessage i
+                (pb1, sk1) <- generation
+                (pb2, sk2) <- generation
+
+                let jpk = maybe (error "cannot verify") id $ combineVerify [pb1,pb2]
+
+                c <- encryption jpk msg
+
+                db1 <- decryptShare sk1 c
+                db2 <- decryptShare sk2 c
+                let mmsg = verifiableDecrypt [(fst pb1, db1), (fst pb2, db2)] c
+                pure $ Just msg === mmsg 
+        
         ]
     ]
