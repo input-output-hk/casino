@@ -40,6 +40,7 @@ module Crypto.Casino.Primitives.TEG
     , encryptionWith
     , encryptionRandom1
     , reRandomize
+    , decryptProofVerify
     , decryptShare
     , decryptShareNoProof
     , verifiableDecrypt
@@ -193,6 +194,15 @@ decryptShare (SecretKey sk) (Ciphertext c1 _) = toDecryptBroadcast <$> keyGenera
     toDecryptBroadcast dleqR =
         (DecryptSharePoint d, DLEQ.generate dleqR sk (DLEQ.DLEQ curveGenerator pk c1 d))
 
+-- | Verify if a decrypt broadcast associated with a ciphertext and a public key
+-- is correct
+decryptProofVerify :: Ciphertext
+                   -> PublicKey
+                   -> DecryptBroadcast
+                   -> Bool
+decryptProofVerify (Ciphertext c1 _) (PublicKey pk) (DecryptSharePoint di, dleq) =
+    DLEQ.verify (DLEQ.DLEQ curveGenerator pk c1 di) dleq
+
 decryptShareNoProof :: SecretKey
                     -> Ciphertext
                     -> DecryptSharePoint
@@ -201,11 +211,11 @@ decryptShareNoProof (SecretKey sk) (Ciphertext c1 _) = DecryptSharePoint d where
 verifiableDecrypt :: [(PublicKey, DecryptBroadcast)] -- ^ decrypt broadcast associated with their public key
                   -> Ciphertext
                   -> Maybe Message
-verifiableDecrypt decrypts (Ciphertext c1 c2)
+verifiableDecrypt decrypts c@(Ciphertext c1 c2)
     | allVerify = Just (c2 .- sumds)
     | otherwise = Nothing
   where
-    allVerify = and $ map (\(PublicKey pk, (DecryptSharePoint di, dleq)) -> DLEQ.verify (DLEQ.DLEQ curveGenerator pk c1 di) dleq) decrypts
+    allVerify = and $ map (uncurry (decryptProofVerify c)) decrypts
     sumds = sumDecryptSharePoints $ map (fst . snd) decrypts
 
 sumDecryptSharePoints :: [DecryptSharePoint] -> Point
@@ -308,6 +318,24 @@ properties = Group "TEG"
                 db2 <- decryptShare sk2 c
                 let mmsg = verifiableDecrypt [(fst pb1, db1), (fst pb2, db2)] c
                 pure $ Just msg === mmsg 
-        
+        , Property "encrypt-3" $ \drg (KoblitzEncodingInteger i) ->
+            fst $ withDRG (drgNewTest drg) $ do
+                let msg = integerToMessage i
+                (pb1, sk1) <- generation
+                (pb2, sk2) <- generation
+                (pb3, sk3) <- generation
+
+                let jpk = maybe (error "cannot verify") id $ combineVerify [pb1,pb2,pb3]
+
+                c <- encryption jpk msg
+
+                db1 <- decryptShare sk1 c
+                db2 <- decryptShare sk2 c
+                db3 <- decryptShare sk3 c
+                let mmsg = verifiableDecrypt [(fst pb1, db1), (fst pb2, db2), (fst pb3, db3)] c
+                let mm1 = verifiableDecryptOwn (fst db1) [(fst pb2, db2), (fst pb3, db3)] c
+                let mm2 = verifiableDecryptOwn (fst db2) [(fst pb1, db1), (fst pb3, db3)] c
+                let mm3 = verifiableDecryptOwn (fst db3) [(fst pb1, db1), (fst pb2, db2)] c
+                pure $ (Just msg === mmsg) `propertyAnd` (Just msg === mm1) `propertyAnd` (Just msg === mm2) `propertyAnd` (Just msg === mm3)
         ]
     ]
