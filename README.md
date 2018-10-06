@@ -14,4 +14,4 @@ Our main research papers:
 
 * casino-prim contains basic crypto ECC, ZKP (DLEQ, DLOG), some data types (Matrix) and some general small utilities
 * shuffle-proof contains the zero knowledge proof of shuffle as per [Efficient Zero-Knowledge Argument for Correctness of a Shuffle](http://www0.cs.ucl.ac.uk/staff/J.Groth/MinimalShuffle.pdf)
-* poker contains the cards, some poker related things, and a EDSL for poker event processing based on a cooperative non-blocking loop.
+* poker contains the cards, some poker related things, and a EDSL for poker event processing based on a cooperative non-blocking loop. It is an almost complete simulator of the Kaleidoscope paper, without the betting procedure and the signatures.
