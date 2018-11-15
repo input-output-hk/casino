@@ -1,4 +1,5 @@
 .stack-work/
-*.cabal
+prim/*.cabal
+shuffle-proof/*.cabal
 *~
 *.swp
